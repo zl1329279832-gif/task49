@@ -92,7 +92,7 @@ public class ExportTask {
      *
      * @param count 本批处理的消息数
      */
-    public void addProcessed(int count) {
+    public synchronized void addProcessed(int count) {
         this.processedMessages += count;
         if (totalMessages > 0) {
             this.progress = Math.min(99, (int) ((long) processedMessages * 100 / totalMessages));
@@ -102,7 +102,16 @@ public class ExportTask {
     /**
      * 标记任务完成
      */
-    public void markCompleted() {
+    public synchronized void markCompleted() {
+        // 如果取消已被请求，优先尊重取消意图
+        if (cancelRequested) {
+            this.status = ExportTaskStatus.CANCELLED;
+            this.finishTime = System.currentTimeMillis();
+            return;
+        }
+        if (this.status != ExportTaskStatus.RUNNING) {
+            return;
+        }
         this.progress = 100;
         this.status = ExportTaskStatus.COMPLETED;
         this.finishTime = System.currentTimeMillis();
@@ -113,7 +122,16 @@ public class ExportTask {
      *
      * @param error 错误信息
      */
-    public void markFailed(String error) {
+    public synchronized void markFailed(String error) {
+        // 如果取消已被请求，优先尊重取消意图
+        if (cancelRequested) {
+            this.status = ExportTaskStatus.CANCELLED;
+            this.finishTime = System.currentTimeMillis();
+            return;
+        }
+        if (this.status != ExportTaskStatus.RUNNING) {
+            return;
+        }
         this.status = ExportTaskStatus.FAILED;
         this.errorMessage = error;
         this.finishTime = System.currentTimeMillis();
@@ -122,7 +140,12 @@ public class ExportTask {
     /**
      * 标记任务取消
      */
-    public void markCancelled() {
+    public synchronized void markCancelled() {
+        if (this.status == ExportTaskStatus.COMPLETED
+                || this.status == ExportTaskStatus.FAILED
+                || this.status == ExportTaskStatus.CANCELLED) {
+            return;
+        }
         this.status = ExportTaskStatus.CANCELLED;
         this.finishTime = System.currentTimeMillis();
     }
