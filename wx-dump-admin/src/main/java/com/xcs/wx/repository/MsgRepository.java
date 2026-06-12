@@ -33,6 +33,21 @@ public interface MsgRepository {
     List<Msg> exportMsg(String talker);
 
     /**
+     * 分批导出数据（指定wxId，支持时间范围和消息类型过滤）
+     *
+     * @param talker   对话者
+     * @param wxId     微信账号ID
+     * @param startTime 起始时间（epoch秒，可选）
+     * @param endTime   结束时间（epoch秒，可选）
+     * @param msgTypes  消息类型过滤（可选）
+     * @param offset    偏移量
+     * @param limit     每批数量
+     * @return Msg
+     */
+    List<Msg> exportMsgBatch(String talker, String wxId, Long startTime, Long endTime,
+                             List<Integer> msgTypes, int offset, int limit);
+
+    /**
      * 微信消息类型及其分布统计
      *
      * @return MsgTypeDistributionVO

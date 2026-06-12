@@ -63,6 +63,29 @@ public class MsgRepositoryImpl extends ServiceImpl<MsgMapper, Msg> implements Ms
     }
 
     @Override
+    public List<Msg> exportMsgBatch(String talker, String wxId, Long startTime, Long endTime,
+                                    List<Integer> msgTypes, int offset, int limit) {
+        List<Msg> msgList = new ArrayList<>();
+        List<String> msgDbList = DataSourceType.getMsgDb(wxId);
+        for (String poolName : msgDbList) {
+            DynamicDataSourceContextHolder.push(poolName);
+            try {
+                List<Msg> queryResultList = super.list(Wrappers.<Msg>lambdaQuery()
+                        .eq(Msg::getStrTalker, talker)
+                        .ge(startTime != null, Msg::getCreateTime, startTime)
+                        .le(endTime != null, Msg::getCreateTime, endTime)
+                        .in(msgTypes != null && !msgTypes.isEmpty(), Msg::getType, msgTypes)
+                        .orderByAsc(Msg::getSequence)
+                        .last("LIMIT " + limit + " OFFSET " + offset));
+                msgList.addAll(queryResultList);
+            } finally {
+                DynamicDataSourceContextHolder.clear();
+            }
+        }
+        return msgList;
+    }
+
+    @Override
     public List<MsgTypeDistributionVO> msgTypeDistribution() {
         Optional<String> poolNameOptional = DataSourceType.getMsgDb().stream().max(Comparator.naturalOrder());
         if (poolNameOptional.isPresent()) {

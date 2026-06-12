@@ -11,7 +11,28 @@ import com.xcs.wx.service.UserService;
  */
 public class DSNameUtil {
 
+    /**
+     * 异步线程中覆盖当前用户wxId（避免依赖SwitchUser.config）
+     */
+    private static final ThreadLocal<String> OVERRIDE_WX_ID = new ThreadLocal<>();
+
     private DSNameUtil() {
+    }
+
+    /**
+     * 设置当前线程的wxId覆盖值（用于异步导出等场景）
+     *
+     * @param wxId wxId
+     */
+    public static void setOverrideWxId(String wxId) {
+        OVERRIDE_WX_ID.set(wxId);
+    }
+
+    /**
+     * 清除当前线程的wxId覆盖值
+     */
+    public static void clearOverrideWxId() {
+        OVERRIDE_WX_ID.remove();
     }
 
     /**
@@ -21,7 +42,11 @@ public class DSNameUtil {
      * @return dsName
      */
     public static String getDSName(String dbName) {
-        return getDSName(SpringUtil.getBean(UserService.class).currentUser(), dbName);
+        String wxId = OVERRIDE_WX_ID.get();
+        if (wxId == null) {
+            wxId = SpringUtil.getBean(UserService.class).currentUser();
+        }
+        return getDSName(wxId, dbName);
     }
 
     /**

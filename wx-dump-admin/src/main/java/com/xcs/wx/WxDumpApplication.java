@@ -17,6 +17,7 @@ import java.util.Date;
  **/
 @SpringBootApplication
 @EnableTransactionManagement
+@EnableScheduling
 public class WxDumpApplication {
 
     public static void main(String[] args) throws UnknownHostException {

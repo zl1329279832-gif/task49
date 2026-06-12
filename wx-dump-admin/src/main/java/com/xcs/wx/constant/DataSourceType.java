@@ -57,13 +57,22 @@ public class DataSourceType {
     public static final String MSG0_DB = "MSG0.db";
 
     /**
-     * 读取MSG*.db
+     * 读取MSG*.db（使用当前用户）
      *
      * @return 数据库名称
      */
     public static List<String> getMsgDb() {
         String wxId = SpringUtil.getBean(UserService.class).currentUser();
-        // 空校验
+        return getMsgDb(wxId);
+    }
+
+    /**
+     * 读取MSG*.db（指定wxId，用于异步任务中避免依赖当前用户上下文）
+     *
+     * @param wxId 微信账号ID
+     * @return 数据库名称
+     */
+    public static List<String> getMsgDb(String wxId) {
         if (wxId == null) {
             return Collections.emptyList();
         }
