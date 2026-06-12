@@ -67,6 +67,19 @@ public class DataSourceType {
         if (wxId == null) {
             return Collections.emptyList();
         }
+        return getMsgDb(wxId);
+    }
+
+    /**
+     * 根据指定wxId读取MSG*.db（不依赖currentUser()，适用于异步线程场景）
+     *
+     * @param wxId 微信账号
+     * @return 数据库名称列表
+     */
+    public static List<String> getMsgDb(String wxId) {
+        if (wxId == null || wxId.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
         return getDb(wxId + "#" + "MSG.*\\.db");
     }
 

@@ -127,4 +127,58 @@ public class MsgRepositoryImpl extends ServiceImpl<MsgMapper, Msg> implements Ms
         }
         return 0;
     }
+
+    @Override
+    public int countMsgByTalker(String wxId, String talker, Long startTime, Long endTime) {
+        List<String> msgDbList = DataSourceType.getMsgDb(wxId);
+        int total = 0;
+        for (String poolName : msgDbList) {
+            try {
+                DynamicDataSourceContextHolder.push(poolName);
+                long count = super.count(Wrappers.<Msg>lambdaQuery()
+                        .eq(Msg::getStrTalker, talker)
+                        .ge(startTime != null, Msg::getCreateTime, startTime)
+                        .le(endTime != null, Msg::getCreateTime, endTime));
+                DynamicDataSourceContextHolder.clear();
+                total += (int) count;
+            } catch (Exception e) {
+                DynamicDataSourceContextHolder.clear();
+                log.warn("Failed to count messages from datasource [{}]: {}", poolName, e.getMessage());
+            }
+        }
+        return total;
+    }
+
+    @Override
+    public List<Msg> queryMsgBatch(String wxId, String talker, Long maxSequence, int batchSize,
+                                   Long startTime, Long endTime) {
+        List<Msg> msgList = new ArrayList<>();
+        List<String> msgDbList = DataSourceType.getMsgDb(wxId).stream()
+                .sorted(Comparator.reverseOrder())
+                .collect(Collectors.toList());
+
+        int remaining = batchSize;
+        for (String poolName : msgDbList) {
+            if (remaining <= 0) {
+                break;
+            }
+            try {
+                DynamicDataSourceContextHolder.push(poolName);
+                List<Msg> queryResultList = super.list(Wrappers.<Msg>lambdaQuery()
+                        .eq(Msg::getStrTalker, talker)
+                        .lt(maxSequence != null, Msg::getSequence, maxSequence)
+                        .ge(startTime != null, Msg::getCreateTime, startTime)
+                        .le(endTime != null, Msg::getCreateTime, endTime)
+                        .orderByDesc(Msg::getSequence)
+                        .last("limit " + remaining));
+                DynamicDataSourceContextHolder.clear();
+                remaining -= queryResultList.size();
+                msgList.addAll(queryResultList);
+            } catch (Exception e) {
+                DynamicDataSourceContextHolder.clear();
+                log.warn("Failed to query batch from datasource [{}]: {}", poolName, e.getMessage());
+            }
+        }
+        return msgList;
+    }
 }

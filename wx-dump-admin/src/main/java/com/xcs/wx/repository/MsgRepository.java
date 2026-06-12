@@ -66,4 +66,29 @@ public interface MsgRepository {
      * @return 消息数量
      */
     int countReceived();
+
+    /**
+     * 按指定wxId统计某talker的消息总数（支持时间范围过滤）
+     *
+     * @param wxId      微信账号
+     * @param talker    聊天对象
+     * @param startTime 开始时间戳(秒)，可为null
+     * @param endTime   结束时间戳(秒)，可为null
+     * @return 消息总数
+     */
+    int countMsgByTalker(String wxId, String talker, Long startTime, Long endTime);
+
+    /**
+     * 按指定wxId分批读取消息（sequence游标分页，支持时间范围过滤）
+     *
+     * @param wxId        微信账号
+     * @param talker      聊天对象
+     * @param maxSequence 当前游标（不含），首次传Long.MAX_VALUE
+     * @param batchSize   每批大小
+     * @param startTime   开始时间戳(秒)，可为null
+     * @param endTime     结束时间戳(秒)，可为null
+     * @return 消息列表
+     */
+    List<Msg> queryMsgBatch(String wxId, String talker, Long maxSequence, int batchSize,
+                            Long startTime, Long endTime);
 }

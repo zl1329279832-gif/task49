@@ -28,6 +28,14 @@ public class ExceptionAdviceConfig {
     }
 
     /**
+     * 捕获IllegalArgumentException异常（参数校验）
+     **/
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseVO<String> handleIllegalArgument(IllegalArgumentException e) {
+        return ResponseVO.error(400, e.getMessage());
+    }
+
+    /**
      * 捕获MyBatisSystemException异常
      **/
     @ExceptionHandler(MyBatisSystemException.class)
