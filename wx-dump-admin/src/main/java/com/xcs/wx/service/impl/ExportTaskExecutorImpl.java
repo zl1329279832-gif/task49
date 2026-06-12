@@ -2,7 +2,7 @@ package com.xcs.wx.service.impl;
 
 import cn.hutool.core.date.DateUtil;
 import cn.hutool.core.io.FileUtil;
-import cn.hutool.extra.spring.SpringUtil;
+
 import com.alibaba.excel.EasyExcel;
 import com.alibaba.excel.ExcelWriter;
 import com.alibaba.excel.write.metadata.WriteSheet;
@@ -22,7 +22,7 @@ import com.xcs.wx.repository.ContactRepository;
 import com.xcs.wx.repository.MsgRepository;
 import com.xcs.wx.service.ExportTaskExecutor;
 import com.xcs.wx.service.ExportTaskManager;
-import com.xcs.wx.service.UserService;
+
 import com.google.protobuf.InvalidProtocolBufferException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -88,7 +88,10 @@ public class ExportTaskExecutorImpl implements ExportTaskExecutor {
                     WriteSheet writeSheet = EasyExcel.writerSheet("聊天记录").build();
                     excelWriter.write(Collections.emptyList(), writeSheet);
                 }
-                task.markCompleted();
+                if (!task.tryMarkCompleted()) {
+                    handleCancellation(task);
+                    return;
+                }
                 exportTaskManager.generateDownloadToken(taskId);
                 return;
             }
@@ -110,22 +113,23 @@ public class ExportTaskExecutorImpl implements ExportTaskExecutor {
                 }
             }
 
-            // 4. 检查最终取消状态
-            if (task.isCancelRequested()) {
+            // 4. 原子地尝试标记完成（若取消请求先到达则转为处理取消）
+            if (!task.tryMarkCompleted()) {
                 handleCancellation(task);
                 return;
             }
-
-            // 5. 标记完成
-            task.markCompleted();
             exportTaskManager.generateDownloadToken(taskId);
             log.info("Task [{}] completed successfully, file=[{}]", taskId, filePath);
 
         } catch (Exception e) {
             log.error("Task [{}] execution failed", taskId, e);
-            task.markFailed(e.getMessage());
-            // 清理失败时的临时文件
-            cleanupFile(task);
+            // 异常可能由取消引起，优先检查取消标志
+            if (task.isCancelRequested()) {
+                handleCancellation(task);
+            } else {
+                task.markFailed(e.getMessage());
+                cleanupFile(task);
+            }
         }
     }
 
@@ -149,6 +153,11 @@ public class ExportTaskExecutorImpl implements ExportTaskExecutor {
                 break;
             }
 
+            // ★ 在过滤前保存原始批次信息，用于游标推进、进度统计和终止判断
+            int originalBatchSize = batch.size();
+            // batch按sequence降序排列，最后一条是最小的
+            long lastOriginalSequence = batch.get(batch.size() - 1).getSequence();
+
             // 消息类型过滤
             if (msgTypes != null && !msgTypes.isEmpty()) {
                 batch = batch.stream()
@@ -156,25 +165,24 @@ public class ExportTaskExecutorImpl implements ExportTaskExecutor {
                         .collect(Collectors.toList());
             }
 
-            // 转换为MsgVO并应用策略
-            List<MsgVO> msgVOList = convertBatch(batch, talker);
-
-            // 转换为ExportMsgVO并写入
-            List<ExportMsgVO> exportList = msgMapping.convertToExportMsgVO(msgVOList);
-            excelWriter.write(exportList, writeSheet);
-
-            // 更新进度
-            task.addProcessed(batch.size());
-
-            // 更新游标（使用原始batch的最后一条sequence）
+            // 过滤后可能为空，但仍需推进游标
             if (!batch.isEmpty()) {
-                // batch按sequence降序排列，最后一条是最小的
-                Msg lastMsg = batch.get(batch.size() - 1);
-                maxSequence = lastMsg.getSequence();
+                // 转换为MsgVO并应用策略
+                List<MsgVO> msgVOList = convertBatch(batch, talker, wxId);
+
+                // 转换为ExportMsgVO并写入
+                List<ExportMsgVO> exportList = msgMapping.convertToExportMsgVO(msgVOList);
+                excelWriter.write(exportList, writeSheet);
             }
 
-            // 如果本批不满，说明已经到底了
-            if (batch.size() < BATCH_SIZE) {
+            // 更新进度（基于原始批次大小，与 totalMessages 口径一致）
+            task.addProcessed(originalBatchSize);
+
+            // 更新游标（基于原始批次的最后一条 sequence）
+            maxSequence = lastOriginalSequence;
+
+            // 原始批次不满，说明该 talker 已读完
+            if (originalBatchSize < BATCH_SIZE) {
                 break;
             }
         }
@@ -183,11 +191,11 @@ public class ExportTaskExecutorImpl implements ExportTaskExecutor {
     /**
      * 批量转换消息并应用策略
      */
-    private List<MsgVO> convertBatch(List<Msg> batch, String talker) {
+    private List<MsgVO> convertBatch(List<Msg> batch, String talker, String wxId) {
         return msgMapping.convert(batch).stream()
                 .sorted(Comparator.comparing(MsgVO::getCreateTime))
                 .peek(msgVO -> {
-                    msgVO.setWxId(getChatWxId(talker, msgVO));
+                    msgVO.setWxId(getChatWxId(talker, msgVO, wxId));
                     msgVO.setStrCreateTime(DateUtil.formatDateTime(new Date(msgVO.getCreateTime() * 1000)));
                     MsgStrategy strategy = MsgStrategyFactory.getStrategy(msgVO.getType(), msgVO.getSubType());
                     if (strategy != null) {
@@ -199,11 +207,15 @@ public class ExportTaskExecutorImpl implements ExportTaskExecutor {
 
     /**
      * 获取对话人Id
+     *
+     * @param talker  聊天对象
+     * @param msgVO   消息
+     * @param wxId    当前登录用户的wxId（由任务创建时在主线程捕获）
      */
-    private String getChatWxId(String talker, MsgVO msgVO) {
+    private String getChatWxId(String talker, MsgVO msgVO, String wxId) {
         if (msgVO.getIsSender() == 1) {
-            // 异步线程中没有currentUser()，从任务的wxId获取
-            return SpringUtil.getBean(UserService.class).currentUser();
+            // 异步线程中没有currentUser()，直接使用任务携带的wxId
+            return wxId;
         }
         try {
             if (talker.endsWith(ChatRoomConstant.CHATROOM_SUFFIX)) {

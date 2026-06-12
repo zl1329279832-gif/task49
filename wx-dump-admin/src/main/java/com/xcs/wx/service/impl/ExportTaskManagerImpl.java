@@ -136,8 +136,10 @@ public class ExportTaskManagerImpl implements ExportTaskManager {
             task.markCancelled();
             log.info("Task [{}] cancelled directly (was PENDING)", taskId);
         } else {
-            // RUNNING状态，设置取消标志，让执行器自行处理
-            task.setCancelRequested(true);
+            // RUNNING状态，线程安全地设置取消标志
+            if (!task.trySetCancelRequested()) {
+                throw new BizException(400, "已完成的任务不能取消");
+            }
             log.info("Task [{}] cancel requested (RUNNING)", taskId);
         }
     }

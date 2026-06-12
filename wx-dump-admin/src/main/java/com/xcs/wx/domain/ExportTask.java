@@ -88,6 +88,11 @@ public class ExportTask {
     private String fileName;
 
     /**
+     * 状态锁 —— 保护 status / cancelRequested 的原子性
+     */
+    private final transient Object stateLock = new Object();
+
+    /**
      * 增加已处理消息数并更新进度
      *
      * @param count 本批处理的消息数
@@ -106,6 +111,39 @@ public class ExportTask {
         this.progress = 100;
         this.status = ExportTaskStatus.COMPLETED;
         this.finishTime = System.currentTimeMillis();
+    }
+
+    /**
+     * 原子地尝试标记完成：若已收到取消请求则返回 false，调用方应转为处理取消。
+     *
+     * @return true 表示成功标记为 COMPLETED；false 表示取消请求先到达
+     */
+    public boolean tryMarkCompleted() {
+        synchronized (stateLock) {
+            if (cancelRequested) {
+                return false;
+            }
+            this.progress = 100;
+            this.status = ExportTaskStatus.COMPLETED;
+            this.finishTime = System.currentTimeMillis();
+            return true;
+        }
+    }
+
+    /**
+     * 线程安全地设置取消标志（RUNNING 状态专用）。
+     * 若任务已进入 COMPLETED 状态则拒绝取消。
+     *
+     * @return true 取消请求已被接受；false 任务已完成，无法取消
+     */
+    public boolean trySetCancelRequested() {
+        synchronized (stateLock) {
+            if (status == ExportTaskStatus.COMPLETED) {
+                return false;
+            }
+            this.cancelRequested = true;
+            return true;
+        }
     }
 
     /**
